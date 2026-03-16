@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "MailDispatcher.Worker": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "Development" //Production
+      }
+    }
+  }
+}

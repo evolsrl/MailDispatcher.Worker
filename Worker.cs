@@ -110,6 +110,15 @@ public sealed class Worker : BackgroundService
 
                         var composeResult = _composer.Compose(item, cfg, inlinePath);
 
+                        await _mailRepository.LogProcesoAsync(
+                            tenantConnection,
+                            item.IdMailEnvio,
+                            "WORKER",
+                            "INFO",
+                            "Resumen de recursos del mail",
+                            $"CIDs={composeResult.CidsDetected.Count}; InlineFound={composeResult.InlineFound.Count}; InlineMissing={composeResult.InlineMissing.Count}; AttachFound={composeResult.AttachmentsFound.Count}; AttachMissing={composeResult.AttachmentsMissing.Count}",
+                            ct);
+
                         if (_tracer.ShowInlineImages)
                         {
                             _tracer.Write($"INLINE PATH -> Base={tenant.BaseDatos} IdMailEnvio={item.IdMailEnvio} Path={inlinePath}");
@@ -131,6 +140,71 @@ public sealed class Worker : BackgroundService
 
                             if (composeResult.AttachmentsMissing.Count > 0)
                                 _tracer.Write($"ATTACH MISSING -> Base={tenant.BaseDatos} IdMailEnvio={item.IdMailEnvio} [{string.Join(" | ", composeResult.AttachmentsMissing)}]");
+                        }
+
+                        // LOG SQL: CIDs detectados
+                        if (composeResult.CidsDetected.Count > 0)
+                        {
+                            await _mailRepository.LogProcesoAsync(
+                                tenantConnection,
+                                item.IdMailEnvio,
+                                "WORKER",
+                                "INFO",
+                                "CID detectados",
+                                string.Join(" | ", composeResult.CidsDetected),
+                                ct);
+                        }
+
+                        // LOG SQL: imágenes inline encontradas
+                        if (composeResult.InlineFound.Count > 0)
+                        {
+                            await _mailRepository.LogProcesoAsync(
+                                tenantConnection,
+                                item.IdMailEnvio,
+                                "WORKER",
+                                "INFO",
+                                "Imagenes inline encontradas",
+                                string.Join(" | ", composeResult.InlineFound),
+                                ct);
+                        }
+
+                        // LOG SQL: imágenes inline faltantes
+                        if (composeResult.InlineMissing.Count > 0)
+                        {
+                            await _mailRepository.LogProcesoAsync(
+                                tenantConnection,
+                                item.IdMailEnvio,
+                                "WORKER",
+                                "WARN",
+                                "Imagenes inline faltantes",
+                                string.Join(" | ", composeResult.InlineMissing),
+                                ct);
+                        }
+
+                        // LOG SQL: adjuntos encontrados
+                        if (composeResult.AttachmentsFound.Count > 0)
+                        {
+                            await _mailRepository.LogProcesoAsync(
+                                tenantConnection,
+                                item.IdMailEnvio,
+                                "WORKER",
+                                "INFO",
+                                "Adjuntos encontrados",
+                                string.Join(" | ", composeResult.AttachmentsFound),
+                                ct);
+                        }
+
+                        // LOG SQL: adjuntos faltantes
+                        if (composeResult.AttachmentsMissing.Count > 0)
+                        {
+                            await _mailRepository.LogProcesoAsync(
+                                tenantConnection,
+                                item.IdMailEnvio,
+                                "WORKER",
+                                "WARN",
+                                "Adjuntos faltantes",
+                                string.Join(" | ", composeResult.AttachmentsMissing),
+                                ct);
                         }
 
                         await _sender.SendAsync(composeResult.Message, cfg, _tracer, ct);

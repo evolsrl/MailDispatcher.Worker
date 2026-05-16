@@ -1,8 +1,9 @@
-using System.Diagnostics;
 using MailDispatcher.Worker.Data;
+using MailDispatcher.Worker.Models;
 using MailDispatcher.Worker.Options;
 using MailDispatcher.Worker.Services;
 using Microsoft.Extensions.Options;
+using System.Diagnostics;
 
 namespace MailDispatcher.Worker;
 
@@ -39,21 +40,60 @@ public sealed class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        do
+        while (!stoppingToken.IsCancellationRequested)
         {
-            await ProcesarCicloAsync(stoppingToken);
+            try
+            {
+                await ProcesarCicloAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Cancelación solicitada. Finalizando worker.");
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error no controlado en el ciclo principal del worker.");
+                _tracer.Write($"WORKER ERROR -> {ex.Message}");
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
 
             if (_options.RunOnce)
                 break;
 
-            await Task.Delay(TimeSpan.FromSeconds(_options.PollSeconds), stoppingToken);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(_options.PollSeconds), stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
-        while (!stoppingToken.IsCancellationRequested);
     }
 
     private async Task ProcesarCicloAsync(CancellationToken ct)
     {
-        var tenants = await _tenantRepository.ObtenerTenantsActivosAsync(ct);
+        IReadOnlyList<TenantConfig> tenants;
+
+        try
+        {
+            tenants = await _tenantRepository.ObtenerTenantsActivosAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "No se pudieron obtener los tenants desde ERP_COMUN.");
+            _tracer.Write($"TENANTS ERROR -> {ex.Message}");
+            return;
+        }
 
         foreach (var tenant in tenants)
         {
@@ -61,6 +101,13 @@ public sealed class Worker : BackgroundService
 
             try
             {
+                await _tenantRepository.LogTenantAsync(
+                    tenant,
+                    "TENANT_START",
+                    null,
+                    "Inicio de procesamiento",
+                    ct);
+
                 if (_tracer.ShowTenantStartEnd)
                     _tracer.Write($"TENANT START -> Base={tenant.BaseDatos} Empresa={tenant.Empresa}");
 
@@ -75,6 +122,13 @@ public sealed class Worker : BackgroundService
 
                 if (mails.Count == 0)
                 {
+                    await _tenantRepository.LogTenantAsync(
+                        tenant,
+                        "TENANT_EMPTY",
+                        0,
+                        "Sin mails pendientes",
+                        ct);
+
                     if (_tracer.ShowTenantStartEnd)
                         _tracer.Write($"TENANT EMPTY -> Base={tenant.BaseDatos}");
                     continue;
@@ -266,6 +320,13 @@ public sealed class Worker : BackgroundService
             }
             catch (Exception ex)
             {
+                await _tenantRepository.LogTenantAsync(
+                    tenant,
+                    "TENANT_ERROR",
+                    null,
+                    ex.Message,
+                    CancellationToken.None);
+
                 _logger.LogError(ex, "Error procesando tenant {BaseDatos}", tenant.BaseDatos);
                 _tracer.Write($"TENANT ERROR -> Base={tenant.BaseDatos} Error={ex.Message}");
             }

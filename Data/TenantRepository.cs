@@ -34,7 +34,62 @@ WHERE IdEstado = 1
 ORDER BY MailOrdenProceso, Grupo, Empresa;";
 
         await using var cn = new SqlConnection(_connectionString);
-        var rows = await cn.QueryAsync<TenantConfig>(new CommandDefinition(sql, cancellationToken: ct));
+
+        var rows = await cn.QueryAsync<TenantConfig>(
+            new CommandDefinition(
+                sql,
+                commandTimeout: 60,
+                cancellationToken: ct));
+
         return rows.ToList();
     }
+
+    public async Task LogTenantAsync(
+    TenantConfig tenant,
+    string evento,
+    int? cantidadMailsTomados,
+    string? mensaje,
+    CancellationToken ct)
+{
+    const string sql = @"
+INSERT INTO dbo.MailDispatcherTenantLog
+(
+    Fecha,
+    Grupo,
+    Empresa,
+    BaseDatos,
+    Evento,
+    CantidadMailsTomados,
+    Mensaje,
+    HostName
+)
+VALUES
+(
+    GETDATE(),
+    @Grupo,
+    @Empresa,
+    @BaseDatos,
+    @Evento,
+    @CantidadMailsTomados,
+    @Mensaje,
+    @HostName
+);";
+
+    await using var cn = new SqlConnection(_connectionString);
+
+    await cn.ExecuteAsync(new CommandDefinition(
+        sql,
+        new
+        {
+            tenant.Grupo,
+            tenant.Empresa,
+            tenant.BaseDatos,
+            Evento = evento,
+            CantidadMailsTomados = cantidadMailsTomados,
+            Mensaje = mensaje,
+            HostName = Environment.MachineName
+        },
+        cancellationToken: ct,
+        commandTimeout: 30));
+}
 }

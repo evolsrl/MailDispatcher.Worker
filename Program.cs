@@ -2,6 +2,7 @@ using MailDispatcher.Worker;
 using MailDispatcher.Worker.Data;
 using MailDispatcher.Worker.Options;
 using MailDispatcher.Worker.Services;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using Serilog;
 
@@ -13,6 +14,11 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
 builder.Services.Configure<DiagnosticOptions>(builder.Configuration.GetSection("Diagnostics"));
+
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+});
 
 builder.Services.AddSerilog();
 

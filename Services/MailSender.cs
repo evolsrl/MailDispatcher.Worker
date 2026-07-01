@@ -8,10 +8,14 @@ namespace MailDispatcher.Worker.Services;
 public sealed class MailSender
 {
     private readonly ILogger<MailSender> _logger;
+    private readonly Office365OAuthTokenProvider _office365OAuthTokenProvider;
 
-    public MailSender(ILogger<MailSender> logger)
+    public MailSender(
+        ILogger<MailSender> logger,
+        Office365OAuthTokenProvider office365OAuthTokenProvider)
     {
         _logger = logger;
+        _office365OAuthTokenProvider = office365OAuthTokenProvider;
     }
 
     public async Task SendAsync(
@@ -33,7 +37,19 @@ public sealed class MailSender
 
         await client.ConnectAsync(profile.Servidor, profile.Puerto, secureSocketOptions, ct);
 
-        if (!string.IsNullOrWhiteSpace(profile.Usuario))
+        var tipoAuth = profile.TipoAutenticacion?.Trim().ToUpperInvariant();
+
+        if (tipoAuth == "OAUTH2_OFFICE365")
+        {
+            if (tracer.ShowSmtpSteps)
+                tracer.Write($"SMTP AUTH OAUTH2 -> User={profile.Usuario}");
+
+            var accessToken = await _office365OAuthTokenProvider.GetAccessTokenAsync(profile, ct);
+
+            var oauth2 = new SaslMechanismOAuth2(profile.Usuario, accessToken);
+            await client.AuthenticateAsync(oauth2, ct);
+        }
+        else if (!string.IsNullOrWhiteSpace(profile.Usuario))
         {
             _logger.LogInformation("SMTP auth User={User}", profile.Usuario);
 

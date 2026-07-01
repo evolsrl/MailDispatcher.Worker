@@ -9,8 +9,7 @@ using Serilog;
 var builder = Host.CreateApplicationBuilder(args);
 
 Log.Logger = new LoggerConfiguration()
-    .ReadFrom.Configuration(builder.Configuration)
-    .CreateLogger();
+    .ReadFrom.Configuration(builder.Configuration)    .CreateLogger();
 
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
 builder.Services.Configure<DiagnosticOptions>(builder.Configuration.GetSection("Diagnostics"));
@@ -27,6 +26,7 @@ builder.Services.AddSingleton<MailRepository>();
 builder.Services.AddSingleton<TenantConnectionStringFactory>();
 builder.Services.AddSingleton<MailComposer>();
 builder.Services.AddSingleton<MailSender>();
+builder.Services.AddSingleton<Office365OAuthTokenProvider>();
 builder.Services.AddSingleton<DiagnosticTracer>();
 
 builder.Services.AddHostedService<Worker>();

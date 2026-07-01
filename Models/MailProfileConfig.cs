@@ -13,4 +13,6 @@ public sealed class MailProfileConfig
     public string ProfileName { get; set; } = "";
     public int IdEstado { get; set; }
     public int CantidadDeMailsPorHora { get; set; }
+    public string? TipoAutenticacion { get; set; }
+    public string? OAuthConfiguracion { get; set; }
 }

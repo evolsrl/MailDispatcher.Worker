@@ -17,6 +17,7 @@ public sealed class Worker : BackgroundService
     private readonly TenantConnectionStringFactory _connectionFactory;
     private readonly WorkerOptions _options;
     private readonly DiagnosticTracer _tracer;
+    private readonly DestinatariosOptions _destinatarios;
 
     public Worker(
         ILogger<Worker> logger,
@@ -26,8 +27,10 @@ public sealed class Worker : BackgroundService
         MailSender sender,
         TenantConnectionStringFactory connectionFactory,
         IOptions<WorkerOptions> options,
-        DiagnosticTracer tracer)
+        DiagnosticTracer tracer,
+        IOptions<DestinatariosOptions> destinatarios)
     {
+        _destinatarios = destinatarios.Value;
         _logger = logger;
         _tenantRepository = tenantRepository;
         _mailRepository = mailRepository;
@@ -40,6 +43,13 @@ public sealed class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (_destinatarios.SoloPermitidos)
+            _logger.LogWarning(
+                "Filtro de destinatarios ACTIVO: solo se envía a {Cantidad} direcciones/dominios permitidos ({Permitidos}); el resto queda en estado {IdEstado} sin enviarse.",
+                _destinatarios.Permitidos.Count, string.Join(", ", _destinatarios.Permitidos), _destinatarios.IdEstadoNoEnviado);
+        else
+            _logger.LogInformation("Filtro de destinatarios desactivado: se envía a todos los destinatarios.");
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -78,6 +88,19 @@ public sealed class Worker : BackgroundService
                 break;
             }
         }
+    }
+
+    private async Task MarcarNoEnviadoAsync(string tenantConnection, TenantConfig tenant, MailQueueItem item, CancellationToken ct)
+    {
+        await _mailRepository.ActualizarEstadoAsync(
+            tenantConnection,
+            item.IdMailEnvio,
+            _destinatarios.IdEstadoNoEnviado,
+            "No enviado: ningún destinatario está en Destinatarios:Permitidos de este ambiente",
+            ct);
+
+        if (_tracer.ShowMailStartEnd)
+            _tracer.Write($"MAIL NO ENVIADO -> Base={tenant.BaseDatos} IdMailEnvio={item.IdMailEnvio} (sin destinatarios permitidos)");
     }
 
     private async Task ProcesarCicloAsync(CancellationToken ct)
@@ -154,6 +177,15 @@ public sealed class Worker : BackgroundService
                             $"Inicio de procesamiento tenant={tenant.BaseDatos}",
                             null,
                             ct);
+
+                        // Filtro de destinatarios antes que nada: un mail que no se va a enviar no debe fallar por la
+                        // configuración SMTP (quedaría Rechazado en lugar de No Enviado).
+                        if (_destinatarios.SoloPermitidos
+                            && !FiltroDestinatarios.HayAlgunPermitido(_destinatarios.Permitidos, item.A, item.Copia, item.CopiaOculta))
+                        {
+                            await MarcarNoEnviadoAsync(tenantConnection, tenant, item, ct);
+                            continue;
+                        }
 
                         var cfg = await _mailRepository.ObtenerConfigAsync(tenantConnection, item.ProfileName, ct);
                         if (cfg is null)
@@ -259,6 +291,29 @@ public sealed class Worker : BackgroundService
                                 "Adjuntos faltantes",
                                 string.Join(" | ", composeResult.AttachmentsMissing),
                                 ct);
+                        }
+
+                        if (_destinatarios.SoloPermitidos)
+                        {
+                            var filtro = FiltroDestinatarios.Aplicar(composeResult.Message, _destinatarios);
+
+                            if (filtro.Quitados.Count > 0)
+                            {
+                                await _mailRepository.LogProcesoAsync(
+                                    tenantConnection,
+                                    item.IdMailEnvio,
+                                    "WORKER",
+                                    "WARN",
+                                    "Destinatarios no permitidos en este ambiente (no se les envía)",
+                                    string.Join(" | ", filtro.Quitados),
+                                    ct);
+                            }
+
+                            if (!filtro.HayDestinatarios)
+                            {
+                                await MarcarNoEnviadoAsync(tenantConnection, tenant, item, ct);
+                                continue;
+                            }
                         }
 
                         await _sender.SendAsync(composeResult.Message, cfg, _tracer, ct);

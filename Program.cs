@@ -13,6 +13,16 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Services.Configure<WorkerOptions>(builder.Configuration.GetSection("Worker"));
 builder.Services.Configure<DiagnosticOptions>(builder.Configuration.GetSection("Diagnostics"));
+builder.Services.Configure<DestinatariosOptions>(builder.Configuration.GetSection("Destinatarios"));
+
+// Fuera de Production (desarrollo, pruebas) las bases tienen correos reales: el filtro de destinatarios queda
+// siempre activo aunque falte o este apagado en la configuracion. Sin Destinatarios:Permitidos no se envia nada.
+var esProduccion = builder.Environment.IsProduction();
+builder.Services.PostConfigure<DestinatariosOptions>(o =>
+{
+    if (!esProduccion)
+        o.SoloPermitidos = true;
+});
 
 builder.Services.Configure<HostOptions>(options =>
 {
